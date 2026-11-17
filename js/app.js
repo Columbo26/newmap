@@ -42,13 +42,53 @@
     };
   }
 
+  const HEX = /^#[0-9a-f]{6}$/i;
+  const color = (c, fb = '#888888') => (HEX.test(c) ? c : fb);
+  const num = (v, fb = 0) => (Number.isFinite(Number(v)) ? Number(v) : fb);
+  const str = (v, fb = '') => (typeof v === 'string' ? v : fb);
+  const safeId = (v) => String(v ?? '').replace(/[^\w-]/g, '') || uid();
+
+  // Приводит сохранённое/импортированное состояние к ожидаемой форме (бросает ошибку, если оно непригодно)
+  function normalize(s) {
+    if (!s || typeof s !== 'object' || !Array.isArray(s.players) || !Array.isArray(s.cells)) throw new Error('bad state');
+    const def = defaultState();
+    const players = s.players.filter((p) => p && typeof p === 'object').map((p, i) => ({
+      id: safeId(p.id), name: str(p.name, `Игрок ${i + 1}`), color: color(p.color, PALETTE[i % PALETTE.length]),
+      points: num(p.points), coins: num(p.coins),
+    }));
+    const cells = s.cells.filter((c) => c && RING[c.ring]).map((c) => ({
+      id: safeId(c.id), ring: c.ring, idx: Math.max(0, Math.floor(num(c.idx))), theme: str(c.theme, 'Любая'), difficulty: DIFF[c.difficulty] ? c.difficulty : 'green',
+    }));
+    if (!cells.length) throw new Error('no cells');
+    const games = (Array.isArray(s.games) ? s.games : def.games).filter((g) => g && DIFF[g.difficulty]).map((g) => ({
+      id: safeId(g.id), title: str(g.title, '?'), theme: str(g.theme, 'Любая'), difficulty: g.difficulty,
+    }));
+    const attempts = (Array.isArray(s.attempts) ? s.attempts : []).filter((a) => a && ['active', 'done', 'dropped'].includes(a.status)).map((a) => ({
+      ...a, id: safeId(a.id), playerId: safeId(a.playerId), cellId: safeId(a.cellId), gameId: safeId(a.gameId), gameTitle: str(a.gameTitle, '?'),
+      ts: num(a.ts, Date.now()), endTs: a.endTs == null ? undefined : num(a.endTs),
+      reward: a.reward ? { points: num(a.reward.points), coins: num(a.reward.coins) } : undefined,
+    }));
+    const log = (Array.isArray(s.log) ? s.log : []).filter((l) => l && typeof l === 'object').map((l) => ({ ts: num(l.ts, Date.now()), text: str(l.text), color: color(l.color) }));
+    const rewards = {}, hours = {};
+    for (const d of D.DIFFICULTIES) {
+      const r = (s.rewards && s.rewards[d.id]) || def.rewards[d.id];
+      rewards[d.id] = { points: num(r.points, def.rewards[d.id].points), coins: num(r.coins, def.rewards[d.id].coins) };
+      hours[d.id] = str(s.hours && s.hours[d.id], def.hours[d.id]);
+    }
+    const rules = { ...def.rules };
+    for (const k of Object.keys(rules)) {
+      const v = s.rules ? s.rules[k] : undefined;
+      if (v === undefined) continue;
+      rules[k] = typeof rules[k] === 'boolean' ? !!v : typeof rules[k] === 'number' ? num(v, rules[k]) : str(v, rules[k]);
+    }
+    const activePlayerId = players.some((p) => p.id === s.activePlayerId) ? s.activePlayerId : players[0]?.id || null;
+    return { version: 1, players, activePlayerId, cells, games, rewards, hours, rules, attempts, log };
+  }
+
   function load() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return defaultState();
-      const s = JSON.parse(raw);
-      const def = defaultState();
-      return { ...def, ...s, rules: { ...def.rules, ...s.rules }, rewards: { ...def.rewards, ...s.rewards }, hours: { ...def.hours, ...s.hours } };
+      return raw ? normalize(JSON.parse(raw)) : defaultState();
     } catch (e) {
       return defaultState();
     }
@@ -654,14 +694,19 @@
     if (t.id === 'file-import' && t.files[0]) {
       t.files[0].text().then((txt) => {
         try {
-          const s = JSON.parse(txt);
-          if (!s.cells || !s.players) throw new Error('bad');
-          state = { ...defaultState(), ...s };
+          const prev = state;
+          try {
+            state = normalize(JSON.parse(txt));
+            renderAll();
+            renderSettings();
+          } catch (err) {
+            state = prev;
+            throw err;
+          }
           save();
-          renderAll();
-          renderSettings();
           alert('Импорт выполнен');
         } catch (err) {
+          renderAll();
           alert('Не удалось прочитать файл');
         }
       });
@@ -757,7 +802,7 @@
     });
     players.addEventListener('change', (e) => {
       if (e.target.dataset.color) {
-        player(e.target.dataset.color).color = e.target.value;
+        player(e.target.dataset.color).color = color(e.target.value, player(e.target.dataset.color).color);
         save(); renderAll();
       }
     });
