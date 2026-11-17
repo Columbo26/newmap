@@ -49,6 +49,7 @@
   // Детерминированный id без символов, опасных для HTML-атрибутов (одинаковые входы → одинаковые id)
   const safeId = (v) => {
     const raw = String(v ?? '');
+    if (!raw) return uid();
     const clean = raw.replace(/[^\p{L}\p{N}_-]/gu, '');
     if (clean === raw && clean) return clean;
     let h = 0;
