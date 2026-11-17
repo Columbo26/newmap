@@ -72,14 +72,14 @@
     const rewards = {}, hours = {};
     for (const d of D.DIFFICULTIES) {
       const r = (s.rewards && s.rewards[d.id]) || def.rewards[d.id];
-      rewards[d.id] = { points: num(r.points, def.rewards[d.id].points), coins: num(r.coins, def.rewards[d.id].coins) };
+      rewards[d.id] = { points: Math.max(0, num(r.points, def.rewards[d.id].points)), coins: Math.max(0, num(r.coins, def.rewards[d.id].coins)) };
       hours[d.id] = str(s.hours && s.hours[d.id], def.hours[d.id]);
     }
     const rules = { ...def.rules };
     for (const k of Object.keys(rules)) {
       const v = s.rules ? s.rules[k] : undefined;
       if (v === undefined) continue;
-      rules[k] = typeof rules[k] === 'boolean' ? !!v : typeof rules[k] === 'number' ? num(v, rules[k]) : str(v, rules[k]);
+      rules[k] = typeof rules[k] === 'boolean' ? !!v : typeof rules[k] === 'number' ? Math.max(k === 'portalMultiplier' ? 1 : 0, num(v, rules[k])) : str(v, rules[k]);
     }
     const activePlayerId = players.some((p) => p.id === s.activePlayerId) ? s.activePlayerId : players[0]?.id || null;
     return { version: 1, players, activePlayerId, cells, games, rewards, hours, rules, attempts, log };
@@ -603,8 +603,8 @@
         ${D.DIFFICULTIES.map((d) => `<tr>
           <td><span class="badge" style="--dc:${d.color}">${d.name}</span></td>
           <td><input data-set="hours.${d.id}" value="${esc(state.hours[d.id])}"></td>
-          <td><input type="number" data-set="rewards.${d.id}.points" value="${state.rewards[d.id].points}"></td>
-          <td><input type="number" data-set="rewards.${d.id}.coins" value="${state.rewards[d.id].coins}"></td>
+          <td><input type="number" min="0" data-set="rewards.${d.id}.points" value="${state.rewards[d.id].points}"></td>
+          <td><input type="number" min="0" data-set="rewards.${d.id}.coins" value="${state.rewards[d.id].coins}"></td>
         </tr>`).join('')}</table>
         <p class="muted small">Портал умножает награду на множитель из вкладки «Правила».</p>`;
     } else if (settingsTab === 'rules') {
@@ -673,7 +673,9 @@
   function onSettingsChange(e) {
     const t = e.target;
     if (t.dataset.set) {
-      let v = t.type === 'checkbox' ? t.checked : t.type === 'number' ? Number(t.value) : t.value;
+      let v = t.type === 'checkbox' ? t.checked : t.type === 'number' ? num(t.value) : t.value;
+      if (t.type === 'number' && t.min !== '') v = Math.max(Number(t.min), v);
+      if (t.type === 'number') t.value = v;
       setPath(t.dataset.set, v);
       save();
       renderAll();
