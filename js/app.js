@@ -46,7 +46,15 @@
   const color = (c, fb = '#888888') => (HEX.test(c) ? c : fb);
   const num = (v, fb = 0) => (Number.isFinite(Number(v)) ? Number(v) : fb);
   const str = (v, fb = '') => (typeof v === 'string' ? v : fb);
-  const safeId = (v) => String(v ?? '').replace(/[^\w-]/g, '') || uid();
+  // Детерминированный id без символов, опасных для HTML-атрибутов (одинаковые входы → одинаковые id)
+  const safeId = (v) => {
+    const raw = String(v ?? '');
+    const clean = raw.replace(/[^\p{L}\p{N}_-]/gu, '');
+    if (clean === raw && clean) return clean;
+    let h = 0;
+    for (const ch of raw) h = (Math.imul(h, 31) + ch.codePointAt(0)) | 0;
+    return `${clean || 'id'}-${(h >>> 0).toString(36)}`;
+  };
 
   // Приводит сохранённое/импортированное состояние к ожидаемой форме (бросает ошибку, если оно непригодно)
   function normalize(s) {
@@ -68,6 +76,8 @@
       ts: num(a.ts, Date.now()), endTs: a.endTs == null ? undefined : num(a.endTs),
       reward: a.reward ? { points: num(a.reward.points), coins: num(a.reward.coins) } : undefined,
     }));
+    const playerIds = new Set(players.map((p) => p.id)), cellIds = new Set(cells.map((c) => c.id));
+    const validAttempts = attempts.filter((a) => playerIds.has(a.playerId) && cellIds.has(a.cellId));
     const log = (Array.isArray(s.log) ? s.log : []).filter((l) => l && typeof l === 'object').map((l) => ({ ts: num(l.ts, Date.now()), text: str(l.text), color: color(l.color) }));
     const rewards = {}, hours = {};
     for (const d of D.DIFFICULTIES) {
@@ -81,8 +91,8 @@
       if (v === undefined) continue;
       rules[k] = typeof rules[k] === 'boolean' ? !!v : typeof rules[k] === 'number' ? Math.max(k === 'portalMultiplier' ? 1 : 0, num(v, rules[k])) : str(v, rules[k]);
     }
-    const activePlayerId = players.some((p) => p.id === s.activePlayerId) ? s.activePlayerId : players[0]?.id || null;
-    return { version: 1, players, activePlayerId, cells, games, rewards, hours, rules, attempts, log };
+    const activePlayerId = players.some((p) => p.id === safeId(s.activePlayerId)) ? safeId(s.activePlayerId) : players[0]?.id || null;
+    return { version: 1, players, activePlayerId, cells, games, rewards, hours, rules, attempts: validAttempts, log };
   }
 
   function load() {
